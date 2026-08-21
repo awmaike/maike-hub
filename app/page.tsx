@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Task = {
   id: number;
@@ -33,12 +33,45 @@ const initialNotes: Note[] = [
   }
 ];
 
+const TASKS_STORAGE_KEY = "maike-hub:tasks";
+const NOTES_STORAGE_KEY = "maike-hub:notes";
+
 export default function Home() {
-  const [tasks, setTasks] = useState(initialTasks);
-  const [notes, setNotes] = useState(initialNotes);
+  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [notes, setNotes] = useState<Note[]>(initialNotes);
   const [taskText, setTaskText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [command, setCommand] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedTasks = localStorage.getItem(TASKS_STORAGE_KEY);
+      const savedNotes = localStorage.getItem(NOTES_STORAGE_KEY);
+
+      if (savedTasks) {
+        setTasks(JSON.parse(savedTasks));
+      }
+
+      if (savedNotes) {
+        setNotes(JSON.parse(savedNotes));
+      }
+    } catch (error) {
+      console.error("Não foi possível carregar os dados locais do Maike Hub.", error);
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+  }, [tasks, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(notes));
+  }, [notes, hydrated]);
 
   const doneCount = useMemo(
     () => tasks.filter((task) => task.done).length,
@@ -146,7 +179,7 @@ export default function Home() {
           <article className="statCard">
             <span>Notas</span>
             <strong>{notes.length}</strong>
-            <small>salvas nesta sessão</small>
+            <small>{hydrated ? "salvas neste navegador" : "carregando..."}</small>
           </article>
           <article className="statCard">
             <span>CPU</span>
