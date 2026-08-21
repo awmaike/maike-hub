@@ -2,162 +2,93 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Section = "inicio" | "servicos" | "historico" | "projetos" | "maquinas" | "atalhos" | "configuracoes";
+type Section = "overview" | "machines" | "services" | "uptime" | "projects" | "deployments" | "incidents" | "shortcuts" | "settings";
+type MachineTab = "overview" | "performance" | "processes" | "network" | "services";
+type ServiceTab = "status" | "uptime" | "latency" | "incidents";
 type Period = "24h" | "7d" | "30d";
-type LinkItem = { id: number; name: string; url: string; category: string };
-type SiteStatus = { id: string; name: string; url: string; online: boolean; status: number; latencyMs: number; checkedAt: string };
-type HistoryService = { id: string; name: string; url: string; uptime: number; avgLatency: number; totalChecks: number; onlineChecks: number; offlineChecks: number; currentOnline: boolean; lastStatus: number; lastCheckedAt: string | null; outages: { startedAt: string; endedAt: string | null; samples: number }[]; chart: { time: string; online: boolean; latencyMs: number; status: number }[] };
-type GitHubData = { repository: { name: string; branch: string; visibility: string; stars: number; forks: number; openIssues: number; updatedAt: string }; commits: { sha: string; shortSha: string; message: string; author: string; date: string; url: string }[] };
-type DeployData = { provider: string; online: boolean; environment: string; deploymentUrl: string; branch: string; commitSha: string; shortSha: string; commitMessage: string; region: string; checkedAt: string };
-type Metrics = { online: boolean; hostname: string; os: string; cpu: { percent: number; name: string; cores?: number; threads?: number }; ram: { percent: number; usedGb: number; totalGb: number }; disk: { percent: number; freeGb: number }; processes?: { name: string; pid: number; ramMb: number; cpuSeconds: number }[]; uptimeHours: number; agentVersion: string };
+type LinkItem = { id:number; name:string; url:string; category:string };
+type SiteStatus = { id:string; name:string; url:string; online:boolean; status:number; latencyMs:number; checkedAt:string };
+type HistoryService = { id:string; name:string; url:string; uptime:number; avgLatency:number; totalChecks:number; onlineChecks:number; offlineChecks:number; currentOnline:boolean; lastStatus:number; lastCheckedAt:string|null; outages:{startedAt:string;endedAt:string|null;samples:number}[]; chart:{time:string;online:boolean;latencyMs:number;status:number}[] };
+type GitHubData = { repository:{name:string;branch:string;visibility:string;stars:number;forks:number;openIssues:number;updatedAt:string}; commits:{sha:string;shortSha:string;message:string;author:string;date:string;url:string}[] };
+type DeployData = { provider:string;online:boolean;environment:string;deploymentUrl:string;branch:string;commitSha:string;shortSha:string;commitMessage:string;region:string;checkedAt:string };
+type Metrics = { online:boolean;hostname:string;os:string;cpu:{percent:number;name:string;cores?:number;threads?:number};ram:{percent:number;usedGb:number;totalGb:number};disk:{percent:number;freeGb:number};gpu?:{name:string;vramGb:number}[];network?:{adapters:{name:string;description?:string;speed:string;mac?:string}[];ipv4:string[]};processes?:{name:string;pid:number;ramMb:number;cpuSeconds:number}[];services?:{name:string;displayName:string;status?:string}[];uptimeHours:number;agentVersion:string };
+type MachinePoint={time:number;cpu:number;ram:number;disk:number};
 
-const AGENT_URL = "http://127.0.0.1:43123/status";
-const LINKS_KEY = "maike-hub:tech-links";
-const initialLinks: LinkItem[] = [
-  { id: 1, name: "GitHub", url: "https://github.com", category: "Dev" },
-  { id: 2, name: "Vercel", url: "https://vercel.com", category: "Deploy" },
-  { id: 3, name: "Registro.br", url: "https://registro.br", category: "Domínios" },
-  { id: 4, name: "Tiflux", url: "https://tiflux.com", category: "Trabalho" },
+const AGENT_URL="http://127.0.0.1:43123/status";
+const LINKS_KEY="maike-hub:tech-links";
+const initialLinks:LinkItem[]=[
+ {id:1,name:"GitHub",url:"https://github.com",category:"Development"},
+ {id:2,name:"Vercel",url:"https://vercel.com",category:"Deploy"},
+ {id:3,name:"Registro.br",url:"https://registro.br",category:"Infrastructure"},
+ {id:4,name:"Tiflux",url:"https://tiflux.com",category:"Work"},
 ];
 
-function NavButton({ id, icon, label, section, onSelect }: { id: Section; icon: string; label: string; section: Section; onSelect: (id: Section) => void }) {
-  return <button className={`navItem ${section === id ? "active" : ""}`} onClick={() => onSelect(id)}>{icon} <span>{label}</span></button>;
+export default function Home(){
+ const[section,setSection]=useState<Section>("overview");
+ const[machineTab,setMachineTab]=useState<MachineTab>("overview");
+ const[serviceTab,setServiceTab]=useState<ServiceTab>("status");
+ const[period,setPeriod]=useState<Period>("24h");
+ const[links,setLinks]=useState<LinkItem[]>(initialLinks);
+ const[linkName,setLinkName]=useState("");
+ const[linkUrl,setLinkUrl]=useState("");
+ const[metrics,setMetrics]=useState<Metrics|null>(null);
+ const[machineHistory,setMachineHistory]=useState<MachinePoint[]>([]);
+ const[sites,setSites]=useState<SiteStatus[]>([]);
+ const[history,setHistory]=useState<HistoryService[]>([]);
+ const[github,setGithub]=useState<GitHubData|null>(null);
+ const[deploy,setDeploy]=useState<DeployData|null>(null);
+ const[loadingHistory,setLoadingHistory]=useState(true);
+
+ useEffect(()=>{const saved=localStorage.getItem(LINKS_KEY);if(saved)try{setLinks(JSON.parse(saved))}catch{}},[]);
+ useEffect(()=>{localStorage.setItem(LINKS_KEY,JSON.stringify(links))},[links]);
+
+ useEffect(()=>{let alive=true;async function poll(){try{const r=await fetch(AGENT_URL,{cache:"no-store"});if(!r.ok)throw 0;const d:Metrics=await r.json();if(!alive)return;setMetrics(d);setMachineHistory(c=>[...c,{time:Date.now(),cpu:Number(d.cpu.percent||0),ram:Number(d.ram.percent||0),disk:Number(d.disk.percent||0)}].slice(-120))}catch{if(alive)setMetrics(null)}}poll();const t=setInterval(poll,3000);return()=>{alive=false;clearInterval(t)}},[]);
+
+ useEffect(()=>{let alive=true;async function cloud(){try{const[s,g,d]=await Promise.all([fetch("/api/status",{cache:"no-store"}),fetch("/api/github",{cache:"no-store"}),fetch("/api/deploy",{cache:"no-store"})]);if(!alive)return;if(s.ok)setSites((await s.json()).services||[]);if(g.ok)setGithub(await g.json());if(d.ok)setDeploy(await d.json())}catch{}}cloud();const t=setInterval(cloud,60000);return()=>{alive=false;clearInterval(t)}},[]);
+
+ useEffect(()=>{let alive=true;async function load(){setLoadingHistory(true);try{const r=await fetch(`/api/history?period=${period}`,{cache:"no-store"});const d=r.ok?await r.json():null;if(alive)setHistory(d?.services||[])}finally{if(alive)setLoadingHistory(false)}}load();const t=setInterval(load,60000);return()=>{alive=false;clearInterval(t)}},[period]);
+
+ const hub=sites.find(s=>s.id==="hub");
+ const domain=sites.find(s=>s.id==="domain");
+ const hubHistory=history.find(s=>s.id==="hub");
+ const incidents=useMemo(()=>history.flatMap(s=>s.outages.map(o=>({service:s.name,...o}))).sort((a,b)=>new Date(b.startedAt).getTime()-new Date(a.startedAt).getTime()),[history]);
+ const badge=(online?:boolean)=>online===undefined?<span className="badge neutral">CHECKING</span>:online?<span className="badge ok">ONLINE</span>:<span className="badge warn">OFFLINE</span>;
+
+ function addLink(){const n=linkName.trim();let u=linkUrl.trim();if(!n||!u)return;if(!/^https?:\/\//i.test(u))u=`https://${u}`;setLinks(c=>[...c,{id:Date.now(),name:n,url:u,category:"Custom"}]);setLinkName("");setLinkUrl("")}
+
+ const periodTabs=<div className="innerTabs">{(["24h","7d","30d"] as Period[]).map(p=><button key={p} className={period===p?"active":""} onClick={()=>setPeriod(p)}>{p==="24h"?"24 hours":p==="7d"?"7 days":"30 days"}</button>)}</div>;
+ const serviceCards=<div className="serviceGrid"><ServiceCard title="Maike Hub" value="hub.maikedev.com.br" detail={hub?`HTTP ${hub.status} · ${hub.latencyMs} ms`:"Checking"} status={badge(hub?.online)}/><ServiceCard title="Root domain" value="maikedev.com.br" detail={domain?`${domain.status?`HTTP ${domain.status} · `:""}${domain.latencyMs} ms`:"Checking"} status={badge(domain?.online)}/><ServiceCard title="GitHub" value={github?.repository.name||"awmaike/maike-hub"} detail={github?`${github.repository.branch} · ${github.commits?.[0]?.shortSha||"—"}`:"Loading"} status={<span className="badge ok">CONNECTED</span>}/><ServiceCard title="Vercel" value={deploy?.environment||"production"} detail={deploy?`${deploy.branch} · ${deploy.shortSha} · ${deploy.region}`:"Loading"} status={<span className="badge ok">DEPLOY OK</span>}/></div>;
+
+ const overview=<><Header eyebrow="OPERATIONS" title="Overview" subtitle="Infrastructure, deployments and workstation health."/><section className="stats"><Stat label="Hub uptime" value={hubHistory?`${hubHistory.uptime.toFixed(2)}%`:"—"} detail={period}/><Stat label="Workstation" value={metrics?"Online":"Offline"} detail={metrics?.hostname||"Agent unavailable"}/><Stat label="CPU" value={metrics?`${metrics.cpu.percent}%`:"—"} detail={metrics?.cpu.name||"No telemetry"}/><Stat label="Last deploy" value={deploy?.shortSha||"—"} detail={deploy?.branch||"Loading"}/></section><section className="dashboardGrid"><article className="panel wide"><div className="panelHeader"><div><p className="eyebrow">INFRASTRUCTURE</p><h2>Service health</h2></div></div>{serviceCards}</article><article className="panel"><div className="panelHeader"><h2>Recent activity</h2><span className="badge neutral">LIVE</span></div><div className="activityList">{github?.commits?.slice(0,3).map(c=><div key={c.sha}><span>Git</span><div><strong>{c.message}</strong><small>{c.shortSha} · {new Date(c.date).toLocaleString("pt-BR")}</small></div></div>)}{deploy&&<div><span>Deploy</span><div><strong>{deploy.commitMessage||"Production deployment"}</strong><small>{deploy.shortSha} · {deploy.region}</small></div></div>}</div></article><article className="panel"><div className="panelHeader"><h2>Open incidents</h2><span className={incidents.some(i=>!i.endedAt)?"badge warn":"badge ok"}>{incidents.some(i=>!i.endedAt)?"ACTION":"CLEAR"}</span></div>{incidents.length?<div className="incidentMini">{incidents.slice(0,4).map((i,idx)=><div key={idx}><span className="incidentDot"/><div><strong>{i.service}</strong><small>{new Date(i.startedAt).toLocaleString("pt-BR")} {i.endedAt?"· recovered":"· ongoing"}</small></div></div>)}</div>:<p className="muted">No incidents recorded in this period.</p>}</article></section></>;
+
+ const machineOverview=metrics?<><section className="stats"><Stat label="CPU" value={`${metrics.cpu.percent}%`} detail={metrics.cpu.name}/><Stat label="RAM" value={`${metrics.ram.percent}%`} detail={`${metrics.ram.usedGb}/${metrics.ram.totalGb} GB`}/><Stat label="Disk" value={`${metrics.disk.percent}%`} detail={`${metrics.disk.freeGb} GB free`}/><Stat label="Uptime" value={`${metrics.uptimeHours}h`} detail={`Agent ${metrics.agentVersion}`}/></section><article className="panel"><div className="panelHeader"><h2>System information</h2><span className="badge ok">AGENT ONLINE</span></div><div className="detailGrid"><span>Hostname<b>{metrics.hostname}</b></span><span>Operating system<b>{metrics.os}</b></span><span>CPU cores<b>{metrics.cpu.cores??"—"}</b></span><span>Threads<b>{metrics.cpu.threads??"—"}</b></span><span>GPU<b>{metrics.gpu?.map(g=>g.name).join(" · ")||"Not available"}</b></span><span>IPv4<b>{metrics.network?.ipv4?.join(" · ")||"Not available"}</b></span></div></article></>:<article className="panel"><h2>Agent offline</h2><p className="muted">Cloud monitoring remains available while workstation telemetry is offline.</p></article>;
+ const performance=metrics?<div className="stack"><article className="panel"><div className="panelHeader"><div><p className="eyebrow">PERFORMANCE</p><h2>CPU utilization</h2></div><strong className="liveValue">{metrics.cpu.percent}%</strong></div><LineChart points={machineHistory.map(x=>({time:x.time,value:x.cpu}))} min={0} max={100} unit="%"/></article><article className="panel"><div className="panelHeader"><div><p className="eyebrow">MEMORY</p><h2>RAM utilization</h2></div><strong className="liveValue">{metrics.ram.percent}%</strong></div><LineChart points={machineHistory.map(x=>({time:x.time,value:x.ram}))} min={0} max={100} unit="%"/></article><article className="panel"><div className="panelHeader"><div><p className="eyebrow">STORAGE</p><h2>Disk utilization</h2></div><strong className="liveValue">{metrics.disk.percent}%</strong></div><LineChart points={machineHistory.map(x=>({time:x.time,value:x.disk}))} min={0} max={100} unit="%"/></article></div>:<article className="panel"><h2>No live telemetry</h2></article>;
+ const processes=<article className="panel"><div className="panelHeader"><h2>Processes</h2><span className="badge neutral">TOP {metrics?.processes?.length||0}</span></div>{metrics?.processes?.length?<div className="processTable"><div className="processRow head"><span>Process</span><span>PID</span><span>Memory</span><span>CPU time</span></div>{metrics.processes.map(p=><div className="processRow" key={p.pid}><strong>{p.name}</strong><span>{p.pid}</span><span>{p.ramMb} MB</span><span>{p.cpuSeconds}s</span></div>)}</div>:<p className="muted">Process telemetry requires the newest agent version.</p>}</article>;
+ const network=<article className="panel"><div className="panelHeader"><h2>Network adapters</h2></div>{metrics?.network?.adapters?.length?<div className="networkList">{metrics.network.adapters.map(a=><div key={a.name}><div><strong>{a.name}</strong><small>{a.description||"Network adapter"}</small></div><span>{a.speed}</span></div>)}</div>:<p className="muted">Network details require the newest agent version.</p>}</article>;
+ const winServices=<article className="panel"><div className="panelHeader"><h2>Windows services</h2></div>{metrics?.services?.length?<div className="windowsServices">{metrics.services.slice(0,20).map(s=><div key={s.name}><span className="statusDot"/><div><strong>{s.displayName}</strong><small>{s.name}</small></div></div>)}</div>:<p className="muted">Service inventory requires the newest agent version.</p>}</article>;
+ const machines=<><Header eyebrow="INFRASTRUCTURE / MACHINES" title="Machines" subtitle="Workstation health, performance, processes and network."/><TabBar tabs={[['overview','Overview'],['performance','Performance'],['processes','Processes'],['network','Network'],['services','Services']]} active={machineTab} setActive={v=>setMachineTab(v as MachineTab)}/>{machineTab==="overview"?machineOverview:machineTab==="performance"?performance:machineTab==="processes"?processes:machineTab==="network"?network:winServices}</>;
+
+ const latencyChart=hubHistory?.chart?.map(p=>({time:new Date(p.time).getTime(),value:p.online?p.latencyMs:0}))||[];
+ const serviceContent=serviceTab==="status"?<><section className="stats"><Stat label="Hub" value={hub?.online?"Online":"Offline"} detail={hub?`${hub.latencyMs} ms · HTTP ${hub.status}`:"Checking"}/><Stat label="Root domain" value={domain?.online?"Online":"Offline"} detail={domain?`${domain.latencyMs} ms":"Checking"}/><Stat label="GitHub" value={github?"Connected":"Loading"} detail={github?.repository.branch||"—"}/><Stat label="Vercel" value={deploy?"Healthy":"Loading"} detail={deploy?.shortSha||"—"}/></section>{serviceCards}</>:serviceTab==="uptime"?<><div className="panelHeader">{periodTabs}</div><div className="serviceGrid">{history.map(s=><article className="serviceCard" key={s.id}><div className="serviceTop"><strong>{s.name}</strong>{badge(s.currentOnline)}</div><p className="bigMetric">{s.uptime.toFixed(3)}%</p><small>{s.onlineChecks}/{s.totalChecks} checks online</small></article>)}</div></>:serviceTab==="latency"?<><div className="panelHeader">{periodTabs}</div><article className="panel"><div className="panelHeader"><div><p className="eyebrow">LATENCY</p><h2>Maike Hub response time</h2></div><strong className="liveValue">{hubHistory?.avgLatency??0} ms avg</strong></div><LineChart points={latencyChart} min={0} max={Math.max(500,...latencyChart.map(x=>x.value))} unit=" ms"/></article></>:<IncidentsPanel incidents={incidents}/>;
+ const services=<><Header eyebrow="INFRASTRUCTURE / SERVICES" title="Services" subtitle="Status, uptime, latency and incidents."/><TabBar tabs={[['status','Status'],['uptime','Uptime'],['latency','Latency'],['incidents','Incidents']]} active={serviceTab} setActive={v=>setServiceTab(v as ServiceTab)}/>{serviceContent}</>;
+
+ const uptime=<><Header eyebrow="INFRASTRUCTURE / UPTIME" title="Uptime history" subtitle="Persistent monitoring stored in Supabase."/><div className="panelHeader">{periodTabs}</div>{loadingHistory?<article className="panel"><p>Loading history...</p></article>:<div className="stack">{history.map(s=><article className="panel" key={s.id}><div className="panelHeader"><div><p className="eyebrow">{s.url}</p><h2>{s.name}</h2></div>{badge(s.currentOnline)}</div><section className="stats"><Stat label="Uptime" value={`${s.uptime.toFixed(3)}%`} detail={`${s.totalChecks} checks`}/><Stat label="Average latency" value={`${s.avgLatency} ms`} detail={period}/><Stat label="Failures" value={`${s.offlineChecks}`} detail={`${s.outages.length} incidents`}/><Stat label="HTTP" value={`${s.lastStatus||"—"}`} detail={s.lastCheckedAt?new Date(s.lastCheckedAt).toLocaleString("pt-BR"):"—"}/></section><LineChart points={s.chart.map(p=>({time:new Date(p.time).getTime(),value:p.online?p.latencyMs:0}))} min={0} max={Math.max(500,...s.chart.map(p=>p.latencyMs))} unit=" ms"/></article>)}</div>}</>;
+
+ const projects=<><Header eyebrow="DEVELOPMENT" title="Projects" subtitle="Repository activity and source control."/><article className="panel"><div className="panelHeader"><div><p className="eyebrow">GITHUB</p><h2>{github?.repository.name||"Maike Hub"}</h2></div><span className="badge ok">{github?.repository.visibility||"PUBLIC"}</span></div>{github&&<><div className="detailGrid"><span>Branch<b>{github.repository.branch}</b></span><span>Open issues<b>{github.repository.openIssues}</b></span><span>Stars<b>{github.repository.stars}</b></span><span>Forks<b>{github.repository.forks}</b></span></div><div className="commitList">{github.commits.map(c=><a key={c.sha} href={c.url} target="_blank" rel="noreferrer"><code>{c.shortSha}</code><div><strong>{c.message}</strong><small>{c.author} · {new Date(c.date).toLocaleString("pt-BR")}</small></div></a>)}</div></>}</article></>;
+ const deployments=<><Header eyebrow="DEVELOPMENT" title="Deployments" subtitle="Production deployment details."/><article className="panel"><div className="panelHeader"><h2>Current production deployment</h2>{deploy?<span className="badge ok">HEALTHY</span>:<span className="badge neutral">LOADING</span>}</div>{deploy&&<div className="detailGrid"><span>Environment<b>{deploy.environment}</b></span><span>Branch<b>{deploy.branch}</b></span><span>Commit<b>{deploy.shortSha}</b></span><span>Region<b>{deploy.region}</b></span><span className="wideDetail">Message<b>{deploy.commitMessage}</b></span><span className="wideDetail">URL<b>{deploy.deploymentUrl}</b></span></div>}</article></>;
+ const incidentsPage=<><Header eyebrow="OPERATIONS" title="Incidents" subtitle="Service interruptions detected by continuous monitoring."/><div className="panelHeader">{periodTabs}</div><IncidentsPanel incidents={incidents}/></>;
+ const shortcuts=<><Header eyebrow="TOOLS" title="Shortcuts" subtitle="Frequently used technical services."/><div className="linkComposer"><input value={linkName} onChange={e=>setLinkName(e.target.value)} placeholder="Name"/><input value={linkUrl} onChange={e=>setLinkUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addLink()} placeholder="https://..."/><button onClick={addLink}>Add</button></div><div className="techLinks">{links.map(l=><a key={l.id} href={l.url} target="_blank" rel="noreferrer"><span>{l.category}</span><strong>{l.name}</strong><small>{l.url.replace(/^https?:\/\//,"")}</small></a>)}</div></>;
+ const settings=<><Header eyebrow="SYSTEM" title="Settings" subtitle="Monitoring configuration and platform roadmap."/><article className="panel"><div className="roadmap"><p>Windows telemetry agent — active</p><p>24/7 uptime monitoring — active</p><p>GitHub integration — active</p><p>Vercel deployment integration — active</p><p>Incident timeline — active</p><p>Remote safe actions — planned</p></div></article></>;
+ const content=section==="overview"?overview:section==="machines"?machines:section==="services"?services:section==="uptime"?uptime:section==="projects"?projects:section==="deployments"?deployments:section==="incidents"?incidentsPage:section==="shortcuts"?shortcuts:settings;
+
+ return <main className="shell"><aside className="sidebar"><div className="brand"><div className="brandMark">M</div><div><strong>Maike Hub</strong><span>Operations Console</span></div></div><nav><NavGroup label="Overview"><NavItem id="overview" label="Overview" icon="▦" current={section} set={setSection}/></NavGroup><NavGroup label="Infrastructure"><NavItem id="machines" label="Machines" icon="▣" current={section} set={setSection}/><NavItem id="services" label="Services" icon="◉" current={section} set={setSection}/><NavItem id="uptime" label="Uptime" icon="⌁" current={section} set={setSection}/></NavGroup><NavGroup label="Development"><NavItem id="projects" label="Projects" icon="⌘" current={section} set={setSection}/><NavItem id="deployments" label="Deployments" icon="↥" current={section} set={setSection}/></NavGroup><NavGroup label="Operations"><NavItem id="incidents" label="Incidents" icon="!" current={section} set={setSection}/><NavItem id="shortcuts" label="Shortcuts" icon="↗" current={section} set={setSection}/></NavGroup><NavGroup label="System"><NavItem id="settings" label="Settings" icon="⚙" current={section} set={setSection}/></NavGroup></nav><div className="sidebarBottom"><div className="statusDot"/><span>Console online</span></div></aside><section className="content">{content}</section></main>;
 }
 
-export default function Home() {
-  const [section, setSection] = useState<Section>("inicio");
-  const [period, setPeriod] = useState<Period>("24h");
-  const [links, setLinks] = useState<LinkItem[]>(initialLinks);
-  const [linkName, setLinkName] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [sites, setSites] = useState<SiteStatus[]>([]);
-  const [history, setHistory] = useState<HistoryService[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [github, setGithub] = useState<GitHubData | null>(null);
-  const [deploy, setDeploy] = useState<DeployData | null>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(LINKS_KEY);
-    if (saved) { try { setLinks(JSON.parse(saved)); } catch {} }
-  }, []);
-  useEffect(() => { localStorage.setItem(LINKS_KEY, JSON.stringify(links)); }, [links]);
-
-  useEffect(() => {
-    let alive = true;
-    async function pollAgent() {
-      try {
-        const r = await fetch(AGENT_URL, { cache: "no-store" });
-        if (!r.ok) throw new Error();
-        const data = await r.json();
-        if (alive) setMetrics(data);
-      } catch { if (alive) setMetrics(null); }
-    }
-    pollAgent();
-    const timer = setInterval(pollAgent, 3000);
-    return () => { alive = false; clearInterval(timer); };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    async function loadCloud() {
-      try {
-        const [s, g, d] = await Promise.all([
-          fetch("/api/status", { cache: "no-store" }),
-          fetch("/api/github", { cache: "no-store" }),
-          fetch("/api/deploy", { cache: "no-store" }),
-        ]);
-        if (!alive) return;
-        if (s.ok) setSites((await s.json()).services || []);
-        if (g.ok) setGithub(await g.json());
-        if (d.ok) setDeploy(await d.json());
-      } catch {}
-    }
-    loadCloud();
-    const timer = setInterval(loadCloud, 60000);
-    return () => { alive = false; clearInterval(timer); };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    async function loadHistory() {
-      setHistoryLoading(true);
-      try {
-        const r = await fetch(`/api/history?period=${period}`, { cache: "no-store" });
-        const data = r.ok ? await r.json() : null;
-        if (alive) setHistory(data?.services || []);
-      } finally { if (alive) setHistoryLoading(false); }
-    }
-    loadHistory();
-    const timer = setInterval(loadHistory, 60000);
-    return () => { alive = false; clearInterval(timer); };
-  }, [period]);
-
-  function addLink() {
-    const n = linkName.trim(); let u = linkUrl.trim();
-    if (!n || !u) return;
-    if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
-    setLinks(c => [...c, { id: Date.now(), name: n, url: u, category: "Personalizado" }]);
-    setLinkName(""); setLinkUrl("");
-  }
-
-  const currentHub = sites.find(s => s.id === "hub");
-  const hubHistory = history.find(s => s.id === "hub");
-  const currentDomain = sites.find(s => s.id === "domain");
-  const machineBadge = metrics ? <span className="badge ok">AGENTE ONLINE</span> : <span className="badge warn">AGENTE OFF</span>;
-  const statusBadge = (online?: boolean) => online === undefined ? <span className="badge neutral">VERIFICANDO</span> : online ? <span className="badge ok">ONLINE</span> : <span className="badge warn">OFFLINE</span>;
-
-  const serviceCards = <div className="serviceGrid">
-    <article className="serviceCard"><div className="serviceTop"><strong>Maike Hub</strong>{statusBadge(currentHub?.online)}</div><p>hub.maikedev.com.br</p><small>{currentHub ? `HTTP ${currentHub.status} · ${currentHub.latencyMs} ms` : "Verificando..."}</small></article>
-    <article className="serviceCard"><div className="serviceTop"><strong>Domínio principal</strong>{statusBadge(currentDomain?.online)}</div><p>maikedev.com.br</p><small>{currentDomain ? `${currentDomain.status ? `HTTP ${currentDomain.status} · ` : ""}${currentDomain.latencyMs} ms` : "Verificando..."}</small></article>
-    <article className="serviceCard"><div className="serviceTop"><strong>GitHub</strong>{github ? <span className="badge ok">CONECTADO</span> : <span className="badge neutral">...</span>}</div><p>{github?.repository.name || "awmaike/maike-hub"}</p><small>{github ? `${github.repository.branch} · ${github.commits?.[0]?.shortSha || "—"}` : "Carregando..."}</small></article>
-    <article className="serviceCard"><div className="serviceTop"><strong>Vercel</strong>{deploy ? <span className="badge ok">DEPLOY OK</span> : <span className="badge neutral">...</span>}</div><p>{deploy?.environment || "production"}</p><small>{deploy ? `${deploy.branch} · ${deploy.shortSha} · ${deploy.region}` : "Carregando..."}</small></article>
-  </div>;
-
-  const periodSelector = <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-    {(["24h", "7d", "30d"] as Period[]).map(p => <button key={p} className={period === p ? "primaryButton" : "secondaryButton"} onClick={() => setPeriod(p)}>{p === "24h" ? "24 horas" : p === "7d" ? "7 dias" : "30 dias"}</button>)}
-  </div>;
-
-  const historyCards = historyLoading ? <article className="panel"><h2>Carregando histórico 24/7...</h2></article> : history.length === 0 ? <article className="panel"><h2>Aguardando dados</h2><p className="muted">O monitor já está coletando no servidor. Os primeiros pontos aparecem aqui assim que forem gravados.</p></article> : <div className="stack">{history.map(service => <article className="panel" key={service.id}>
-    <div className="panelHeader"><div><p className="eyebrow">MONITORAMENTO 24/7</p><h2>{service.name}</h2></div>{statusBadge(service.currentOnline)}</div>
-    <div className="metricCards">
-      <MetricCard label="Uptime" value={`${service.uptime.toFixed(3)}%`} detail={`${service.onlineChecks}/${service.totalChecks} verificações online`} percent={service.uptime}/>
-      <MetricCard label="Latência média" value={`${service.avgLatency} ms`} detail={`Período: ${period}`}/>
-      <MetricCard label="Falhas" value={`${service.offlineChecks}`} detail={`${service.outages.length} incidentes agrupados`}/>
-      <MetricCard label="Último HTTP" value={`${service.lastStatus || "—"}`} detail={service.lastCheckedAt ? new Date(service.lastCheckedAt).toLocaleString("pt-BR") : "—"}/>
-    </div>
-    <div style={{ marginTop: 18 }}>
-      <p className="eyebrow">LINHA DO TEMPO</p>
-      <div style={{ display: "flex", gap: 2, height: 28, overflow: "hidden", borderRadius: 8, background: "rgba(255,255,255,.04)", padding: 3 }}>
-        {service.chart.slice(-180).map((point, i) => <div key={`${point.time}-${i}`} title={`${new Date(point.time).toLocaleString("pt-BR")} · ${point.online ? "Online" : "Offline"} · ${point.latencyMs} ms`} style={{ flex: 1, minWidth: 2, borderRadius: 3, background: point.online ? "#4de98b" : "#ff6b6b", opacity: .9 }} />)}
-      </div>
-    </div>
-    <div style={{ marginTop: 18 }}><ChartCard title="Latência ao longo do período" values={service.chart.filter(x => x.online).slice(-120).map(x => x.latencyMs)} suffix=" ms" /></div>
-    {service.outages.length > 0 && <div style={{ marginTop: 18 }}><p className="eyebrow">ÚLTIMAS QUEDAS</p><div className="roadmap">{service.outages.slice(0, 5).map((o, i) => <p key={i}>🔴 {new Date(o.startedAt).toLocaleString("pt-BR")} → {o.endedAt ? new Date(o.endedAt).toLocaleString("pt-BR") : "ainda offline"} · {o.samples} verificações</p>)}</div></div>}
-  </article>)}</div>;
-
-  const machinePanel = metrics ? <div className="stack"><article className="panel"><div className="panelHeader"><div><p className="eyebrow">TELEMETRIA AO VIVO</p><h2>{metrics.hostname}</h2></div>{machineBadge}</div><div className="metricCards"><MetricCard label="CPU" value={`${metrics.cpu.percent}%`} detail={metrics.cpu.name} percent={metrics.cpu.percent}/><MetricCard label="RAM" value={`${metrics.ram.percent}%`} detail={`${metrics.ram.usedGb}/${metrics.ram.totalGb} GB`} percent={metrics.ram.percent}/><MetricCard label="Disco" value={`${metrics.disk.percent}%`} detail={`${metrics.disk.freeGb} GB livres`} percent={metrics.disk.percent}/><MetricCard label="Uptime" value={`${metrics.uptimeHours}h`} detail={`Agent v${metrics.agentVersion}`}/></div></article>{metrics.processes && <article className="panel"><div className="panelHeader"><h2>Processos</h2><span className="badge neutral">TOP {metrics.processes.length}</span></div><div className="processTable"><div className="processRow head"><span>Processo</span><span>PID</span><span>RAM</span><span>CPU</span></div>{metrics.processes.map(p => <div className="processRow" key={p.pid}><strong>{p.name}</strong><span>{p.pid}</span><span>{p.ramMb} MB</span><span>{p.cpuSeconds}s</span></div>)}</div></article>}</div> : <article className="panel"><h2>Agente local offline</h2><p className="muted">O restante do Hub e o monitoramento 24/7 continuam funcionando normalmente.</p></article>;
-
-  const projects = <div className="stack"><article className="panel"><div className="panelHeader"><div><p className="eyebrow">GITHUB REAL</p><h2>{github?.repository.name || "Maike Hub"}</h2></div><span className="badge ok">{github?.repository.visibility || "..."}</span></div>{github ? <><div className="repoStats"><span>Branch <b>{github.repository.branch}</b></span><span>Issues <b>{github.repository.openIssues}</b></span><span>Stars <b>{github.repository.stars}</b></span><span>Forks <b>{github.repository.forks}</b></span></div><div className="commitList">{github.commits.map(c => <a key={c.sha} href={c.url} target="_blank" rel="noreferrer"><code>{c.shortSha}</code><div><strong>{c.message}</strong><small>{c.author} · {new Date(c.date).toLocaleString("pt-BR")}</small></div></a>)}</div></> : <p className="muted">Carregando GitHub...</p>}</article><article className="panel"><div className="panelHeader"><div><p className="eyebrow">VERCEL REAL</p><h2>Deploy atual</h2></div>{deploy ? <span className="badge ok">ONLINE</span> : <span className="badge neutral">...</span>}</div>{deploy && <div className="deployGrid"><span>Ambiente <b>{deploy.environment}</b></span><span>Branch <b>{deploy.branch}</b></span><span>Commit <b>{deploy.shortSha}</b></span><span>Região <b>{deploy.region}</b></span><span className="full">Mensagem <b>{deploy.commitMessage}</b></span></div>}</article></div>;
-
-  const shortcuts = <><div className="linkComposer"><input value={linkName} onChange={e => setLinkName(e.target.value)} placeholder="Nome"/><input value={linkUrl} onChange={e => setLinkUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && addLink()} placeholder="https://..."/><button onClick={addLink}>Adicionar</button></div><div className="techLinks">{links.map(l => <a key={l.id} href={l.url} target="_blank" rel="noreferrer"><span>{l.category}</span><strong>{l.name}</strong><small>{l.url.replace(/^https?:\/\//, "")}</small></a>)}</div></>;
-
-  let content;
-  if (section === "servicos") content = <><Header eyebrow="INFRAESTRUTURA" title="Serviços" subtitle="Status atual e acesso direto ao histórico persistente."/><section className="stats"><article className="statCard"><span>Uptime Hub</span><strong>{hubHistory ? `${hubHistory.uptime.toFixed(2)}%` : "..."}</strong><small>{period}</small></article><article className="statCard"><span>Latência média</span><strong>{hubHistory ? `${hubHistory.avgLatency} ms` : "..."}</strong><small>servidor 24/7</small></article><article className="statCard"><span>Verificações</span><strong>{hubHistory?.totalChecks ?? "..."}</strong><small>gravadas no banco</small></article><article className="statCard"><span>Falhas</span><strong>{hubHistory?.offlineChecks ?? "..."}</strong><small>no período</small></article></section><article className="panel"><div className="panelHeader"><div><p className="eyebrow">STATUS AGORA</p><h2>Serviços</h2></div><button className="primaryButton" onClick={() => setSection("historico")}>Abrir histórico 24/7</button></div>{serviceCards}</article></>;
-  else if (section === "historico") content = <><Header eyebrow="SUPABASE 24/7" title="Histórico" subtitle="Dados persistentes coletados mesmo com seu navegador e PC desligados."/><article className="panel" style={{ minHeight: "auto", marginBottom: 14 }}><div className="panelHeader"><div><p className="eyebrow">PERÍODO</p><h2>Escolha a janela</h2></div>{periodSelector}</div></article>{historyCards}</>;
-  else if (section === "projetos") content = <><Header eyebrow="DESENVOLVIMENTO" title="Projetos" subtitle="GitHub e Vercel reais."/>{projects}</>;
-  else if (section === "maquinas") content = <><Header eyebrow="HARDWARE" title="Máquinas" subtitle="Telemetria local do Windows."/>{machinePanel}</>;
-  else if (section === "atalhos") content = <><Header eyebrow="FERRAMENTAS" title="Atalhos" subtitle="Acessos técnicos personalizados."/>{shortcuts}</>;
-  else if (section === "configuracoes") content = <><Header eyebrow="SISTEMA" title="Configurações" subtitle="Estado atual do Maike Hub."/><article className="panel"><div className="roadmap"><p>✅ Agente Windows e telemetria</p><p>✅ Monitoramento HTTP real</p><p>✅ Histórico 24/7 persistente no Supabase</p><p>✅ Uptime 24h / 7d / 30d visível no Hub</p><p>✅ GitHub real</p><p>✅ Informações do deploy Vercel</p></div></article></>;
-  else content = <><Header eyebrow="CENTRAL TÉCNICA" title="Maike Hub" subtitle="Agora o histórico 24/7 aparece diretamente no dashboard."/><section className="stats"><article className="statCard"><span>Hub agora</span><strong>{currentHub ? (currentHub.online ? "Online" : "Offline") : "..."}</strong><small>{currentHub ? `${currentHub.latencyMs} ms` : "verificando"}</small></article><article className="statCard"><span>Uptime 24/7</span><strong>{hubHistory ? `${hubHistory.uptime.toFixed(2)}%` : "..."}</strong><small>{period}</small></article><article className="statCard"><span>Máquina</span><strong>{metrics ? "Online" : "Offline"}</strong><small>{metrics?.hostname || "agente local"}</small></article><article className="statCard"><span>Último deploy</span><strong>{deploy?.shortSha || "..."}</strong><small>{deploy?.branch || "carregando"}</small></article></section><section className="dashboardGrid"><article className="panel wide"><div className="panelHeader"><div><p className="eyebrow">STATUS ATUAL</p><h2>Infraestrutura</h2></div></div>{serviceCards}</article><article className="panel"><div className="panelHeader"><div><p className="eyebrow">24/7</p><h2>Uptime persistente</h2></div><span className="badge ok">SUPABASE</span></div><p className="muted">{hubHistory ? `${hubHistory.totalChecks} verificações gravadas · ${hubHistory.offlineChecks} falhas · ${hubHistory.avgLatency} ms de média.` : "Carregando histórico do servidor..."}</p><button className="primaryButton" onClick={() => setSection("historico")}>Ver gráficos e quedas</button></article><article className="panel"><div className="panelHeader"><h2>Meu PC</h2>{machineBadge}</div><p className="muted">{metrics ? `${metrics.cpu.percent}% CPU · ${metrics.ram.percent}% RAM` : "Agente local indisponível."}</p><button className="secondaryButton" onClick={() => setSection("maquinas")}>Abrir máquina</button></article></section></>;
-
-  return <main className="shell"><aside className="sidebar"><div className="brand"><div className="brandMark">M</div><div><strong>Maike Hub</strong><span>Tech Control</span></div></div><nav><NavButton id="inicio" icon="⌂" label="Visão geral" section={section} onSelect={setSection}/><NavButton id="servicos" icon="◉" label="Serviços" section={section} onSelect={setSection}/><NavButton id="historico" icon="▥" label="Histórico 24/7" section={section} onSelect={setSection}/><NavButton id="projetos" icon="⌘" label="Projetos" section={section} onSelect={setSection}/><NavButton id="maquinas" icon="▣" label="Máquinas" section={section} onSelect={setSection}/><NavButton id="atalhos" icon="↗" label="Atalhos" section={section} onSelect={setSection}/><NavButton id="configuracoes" icon="⚙" label="Configurações" section={section} onSelect={setSection}/></nav><div className="sidebarBottom"><div className="statusDot"/><span>Hub online</span></div></aside><section className="content">{content}</section></main>;
-}
-
-function Header({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) { return <header className="topbar"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="muted">{subtitle}</p></div><div className="avatar">M</div></header>; }
-function MetricCard({ label, value, detail, percent }: { label: string; value: string; detail: string; percent?: number }) { return <div className="metricCard"><span>{label}</span><strong>{value}</strong><small>{detail}</small>{typeof percent === "number" && <div className="meter"><i style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}/></div>}</div>; }
-function ChartCard({ title, values, suffix = "" }: { title: string; values: number[]; suffix?: string }) {
-  const points = useMemo(() => { if (values.length < 2) return ""; const max = Math.max(...values, 1), min = Math.min(...values, 0), range = Math.max(1, max - min); return values.map((v, i) => `${(i / (values.length - 1)) * 100},${70 - ((v - min) / range) * 60}`).join(" "); }, [values]);
-  const last = values.at(-1) ?? 0;
-  return <div className="chartCard"><div><strong>{title}</strong><span>{last}{suffix}</span></div>{points ? <svg className="sparkline" viewBox="0 0 100 75" preserveAspectRatio="none"><polyline fill="none" vectorEffect="non-scaling-stroke" points={points}/></svg> : <p className="muted" style={{ marginTop: 16 }}>Aguardando mais pontos...</p>}</div>;
-}
+function Header({eyebrow,title,subtitle}:{eyebrow:string;title:string;subtitle:string}){return <header className="topbar"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="muted">{subtitle}</p></div><div className="avatar">M</div></header>}
+function NavGroup({label,children}:{label:string;children:React.ReactNode}){return <div className="navGroup"><span className="navGroupLabel">{label}</span>{children}</div>}
+function NavItem({id,label,icon,current,set}:{id:Section;label:string;icon:string;current:Section;set:(s:Section)=>void}){return <button className={`navItem ${current===id?"active":""}`} onClick={()=>set(id)}><span className="navIcon">{icon}</span><span>{label}</span></button>}
+function TabBar({tabs,active,setActive}:{tabs:[string,string][];active:string;setActive:(v:string)=>void}){return <div className="innerTabs">{tabs.map(([id,label])=><button key={id} className={active===id?"active":""} onClick={()=>setActive(id)}>{label}</button>)}</div>}
+function Stat({label,value,detail}:{label:string;value:string;detail:string}){return <article className="statCard"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>}
+function ServiceCard({title,value,detail,status}:{title:string;value:string;detail:string;status:React.ReactNode}){return <article className="serviceCard"><div className="serviceTop"><strong>{title}</strong>{status}</div><p>{value}</p><small>{detail}</small></article>}
+function IncidentsPanel({incidents}:{incidents:{service:string;startedAt:string;endedAt:string|null;samples:number}[]}){return <article className="panel"><div className="panelHeader"><h2>Incident timeline</h2><span className="badge neutral">{incidents.length}</span></div>{incidents.length?<div className="incidentList">{incidents.map((i,idx)=><div className="incidentRow" key={idx}><span className={i.endedAt?"incidentDot recovered":"incidentDot"}/><div><strong>{i.service} unavailable</strong><p>{new Date(i.startedAt).toLocaleString("pt-BR")} → {i.endedAt?new Date(i.endedAt).toLocaleString("pt-BR"):"ongoing"}</p><small>{i.samples} failed checks</small></div><span className={i.endedAt?"badge ok":"badge warn"}>{i.endedAt?"RECOVERED":"OPEN"}</span></div>)}</div>:<p className="muted">No incidents recorded for the selected period.</p>}</article>}
+function LineChart({points,min,max,unit}:{points:{time:number;value:number}[];min:number;max:number;unit:string}){const data=points.slice(-120);if(!data.length)return <div className="lineChartEmpty">Waiting for data…</div>;const width=1000,height=300,padL=54,padR=18,padT=18,padB=34;const range=Math.max(1,max-min);const x=(i:number)=>padL+(i/Math.max(1,data.length-1))*(width-padL-padR);const y=(v:number)=>padT+(1-(v-min)/range)*(height-padT-padB);const path=data.map((p,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");const yTicks=[0,.25,.5,.75,1].map(f=>max-(max-min)*f);const times=[0,.25,.5,.75,1].map(f=>data[Math.round((data.length-1)*f)]?.time).filter(Boolean) as number[];const avg=data.reduce((a,b)=>a+b.value,0)/data.length;const peak=Math.max(...data.map(d=>d.value));return <div className="fullLineChart"><div className="chartSummary"><span>Current <b>{data.at(-1)!.value.toFixed(1)}{unit}</b></span><span>Average <b>{avg.toFixed(1)}{unit}</b></span><span>Peak <b>{peak.toFixed(1)}{unit}</b></span></div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">{yTicks.map((t,i)=>{const yy=padT+i*((height-padT-padB)/4);return <g key={i}><line x1={padL} y1={yy} x2={width-padR} y2={yy} className="gridLine"/><text x={padL-10} y={yy+4} textAnchor="end">{Math.round(t)}{unit}</text></g>})}{times.map((t,i)=>{const xx=padL+i*((width-padL-padR)/4);return <g key={t}><line x1={xx} y1={padT} x2={xx} y2={height-padB} className="gridLine vertical"/><text x={xx} y={height-10} textAnchor={i===0?"start":i===4?"end":"middle"}>{new Date(t).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</text></g>})}<path d={path} className="dataLine" fill="none"/></svg></div>}
