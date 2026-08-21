@@ -14,6 +14,8 @@ type Note = {
   text: string;
 };
 
+type Section = "inicio" | "tarefas" | "notas" | "calendario" | "arquivos" | "configuracoes";
+
 const initialTasks: Task[] = [
   { id: 1, title: "Revisar projeto pessoal", done: false },
   { id: 2, title: "Organizar downloads", done: true },
@@ -43,19 +45,15 @@ export default function Home() {
   const [noteText, setNoteText] = useState("");
   const [command, setCommand] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const [section, setSection] = useState<Section>("inicio");
 
   useEffect(() => {
     try {
       const savedTasks = localStorage.getItem(TASKS_STORAGE_KEY);
       const savedNotes = localStorage.getItem(NOTES_STORAGE_KEY);
 
-      if (savedTasks) {
-        setTasks(JSON.parse(savedTasks));
-      }
-
-      if (savedNotes) {
-        setNotes(JSON.parse(savedNotes));
-      }
+      if (savedTasks) setTasks(JSON.parse(savedTasks));
+      if (savedNotes) setNotes(JSON.parse(savedNotes));
     } catch (error) {
       console.error("Não foi possível carregar os dados locais do Maike Hub.", error);
     } finally {
@@ -81,10 +79,7 @@ export default function Home() {
   function addTask() {
     const title = taskText.trim();
     if (!title) return;
-    setTasks((current) => [
-      ...current,
-      { id: Date.now(), title, done: false }
-    ]);
+    setTasks((current) => [...current, { id: Date.now(), title, done: false }]);
     setTaskText("");
   }
 
@@ -105,10 +100,7 @@ export default function Home() {
     if (value.startsWith("tarefa ")) {
       const title = command.slice(7).trim();
       if (title) {
-        setTasks((current) => [
-          ...current,
-          { id: Date.now(), title, done: false }
-        ]);
+        setTasks((current) => [...current, { id: Date.now(), title, done: false }]);
       }
     } else if (value.startsWith("nota ")) {
       const text = command.slice(5).trim();
@@ -123,33 +115,172 @@ export default function Home() {
     setCommand("");
   }
 
-  return (
-    <main className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brandMark">M</div>
-          <div>
-            <strong>Maike Hub</strong>
-            <span>Personal OS</span>
+  const NavButton = ({ id, icon, label }: { id: Section; icon: string; label: string }) => (
+    <button
+      className={`navItem ${section === id ? "active" : ""}`}
+      onClick={() => setSection(id)}
+    >
+      {icon} <span>{label}</span>
+    </button>
+  );
+
+  const TaskPanel = () => (
+    <article className="panel">
+      <div className="panelHeader">
+        <div>
+          <p className="eyebrow">HOJE</p>
+          <h2>Tarefas</h2>
+        </div>
+        <span>{doneCount}/{tasks.length}</span>
+      </div>
+
+      <div className="quickInput">
+        <input
+          value={taskText}
+          onChange={(e) => setTaskText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addTask()}
+          placeholder="Adicionar tarefa..."
+        />
+        <button onClick={addTask}>+</button>
+      </div>
+
+      <div className="taskList">
+        {tasks.map((task) => (
+          <label className="task" key={task.id}>
+            <input
+              type="checkbox"
+              checked={task.done}
+              onChange={() =>
+                setTasks((current) =>
+                  current.map((item) =>
+                    item.id === task.id ? { ...item, done: !item.done } : item
+                  )
+                )
+              }
+            />
+            <span className={task.done ? "done" : ""}>{task.title}</span>
+          </label>
+        ))}
+      </div>
+    </article>
+  );
+
+  const NotesPanel = () => (
+    <article className="panel">
+      <div className="panelHeader">
+        <div>
+          <p className="eyebrow">CAPTURA RÁPIDA</p>
+          <h2>Notas</h2>
+        </div>
+      </div>
+
+      <div className="noteComposer">
+        <textarea
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          placeholder="Escreva qualquer coisa..."
+        />
+        <button onClick={addNote}>Salvar nota</button>
+      </div>
+
+      <div className="noteList">
+        {notes.map((note) => (
+          <div className="note" key={note.id}>
+            <strong>{note.title}</strong>
+            <p>{note.text}</p>
           </div>
-        </div>
+        ))}
+      </div>
+    </article>
+  );
 
-        <nav>
-          <button className="navItem active">⌂ <span>Início</span></button>
-          <button className="navItem">✓ <span>Tarefas</span></button>
-          <button className="navItem">✎ <span>Notas</span></button>
-          <button className="navItem">◫ <span>Calendário</span></button>
-          <button className="navItem">⌁ <span>Arquivos</span></button>
-          <button className="navItem">⚙ <span>Configurações</span></button>
-        </nav>
+  function renderContent() {
+    if (section === "tarefas") {
+      return (
+        <>
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">ORGANIZAÇÃO</p>
+              <h1>Tarefas</h1>
+              <p className="muted">Crie, acompanhe e conclua suas tarefas.</p>
+            </div>
+          </header>
+          <section className="grid"><TaskPanel /></section>
+        </>
+      );
+    }
 
-        <div className="sidebarBottom">
-          <div className="statusDot" />
-          <span>Sistema local online</span>
-        </div>
-      </aside>
+    if (section === "notas") {
+      return (
+        <>
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">ANOTAÇÕES</p>
+              <h1>Notas</h1>
+              <p className="muted">Suas ideias e lembretes em um só lugar.</p>
+            </div>
+          </header>
+          <section className="grid"><NotesPanel /></section>
+        </>
+      );
+    }
 
-      <section className="content">
+    if (section === "calendario") {
+      return (
+        <>
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">AGENDA</p>
+              <h1>Calendário</h1>
+              <p className="muted">Este módulo está pronto para receber sua agenda.</p>
+            </div>
+          </header>
+          <article className="panel">
+            <h2>Calendário em construção</h2>
+            <p className="hint">Na próxima evolução vamos colocar visual mensal, eventos e integração com suas tarefas.</p>
+          </article>
+        </>
+      );
+    }
+
+    if (section === "arquivos") {
+      return (
+        <>
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">CENTRAL DE ARQUIVOS</p>
+              <h1>Arquivos</h1>
+              <p className="muted">Um espaço para organizar documentos e atalhos importantes.</p>
+            </div>
+          </header>
+          <article className="panel">
+            <h2>Arquivos em construção</h2>
+            <p className="hint">Aqui vamos adicionar upload, categorias, pesquisa e acesso rápido aos seus documentos.</p>
+          </article>
+        </>
+      );
+    }
+
+    if (section === "configuracoes") {
+      return (
+        <>
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">PREFERÊNCIAS</p>
+              <h1>Configurações</h1>
+              <p className="muted">Personalize o comportamento do Maike Hub.</p>
+            </div>
+          </header>
+          <article className="panel">
+            <h2>Configurações em construção</h2>
+            <p className="hint">Em breve: tema, atalhos personalizados, integrações e preferências do painel.</p>
+          </article>
+        </>
+      );
+    }
+
+    return (
+      <>
         <header className="topbar">
           <div>
             <p className="eyebrow">CENTRAL PESSOAL</p>
@@ -194,73 +325,8 @@ export default function Home() {
         </section>
 
         <section className="grid">
-          <article className="panel">
-            <div className="panelHeader">
-              <div>
-                <p className="eyebrow">HOJE</p>
-                <h2>Tarefas</h2>
-              </div>
-              <span>{doneCount}/{tasks.length}</span>
-            </div>
-
-            <div className="quickInput">
-              <input
-                value={taskText}
-                onChange={(e) => setTaskText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addTask()}
-                placeholder="Adicionar tarefa..."
-              />
-              <button onClick={addTask}>+</button>
-            </div>
-
-            <div className="taskList">
-              {tasks.map((task) => (
-                <label className="task" key={task.id}>
-                  <input
-                    type="checkbox"
-                    checked={task.done}
-                    onChange={() =>
-                      setTasks((current) =>
-                        current.map((item) =>
-                          item.id === task.id
-                            ? { ...item, done: !item.done }
-                            : item
-                        )
-                      )
-                    }
-                  />
-                  <span className={task.done ? "done" : ""}>{task.title}</span>
-                </label>
-              ))}
-            </div>
-          </article>
-
-          <article className="panel">
-            <div className="panelHeader">
-              <div>
-                <p className="eyebrow">CAPTURA RÁPIDA</p>
-                <h2>Notas</h2>
-              </div>
-            </div>
-
-            <div className="noteComposer">
-              <textarea
-                value={noteText}
-                onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Escreva qualquer coisa..."
-              />
-              <button onClick={addNote}>Salvar nota</button>
-            </div>
-
-            <div className="noteList">
-              {notes.slice(0, 3).map((note) => (
-                <div className="note" key={note.id}>
-                  <strong>{note.title}</strong>
-                  <p>{note.text}</p>
-                </div>
-              ))}
-            </div>
-          </article>
+          <TaskPanel />
+          <NotesPanel />
 
           <article className="panel shortcutsPanel">
             <div className="panelHeader">
@@ -269,12 +335,11 @@ export default function Home() {
                 <h2>Atalhos</h2>
               </div>
             </div>
-
             <div className="shortcuts">
-              <a href="https://github.com" target="_blank">GitHub</a>
-              <a href="https://mail.google.com" target="_blank">Gmail</a>
-              <a href="https://drive.google.com" target="_blank">Drive</a>
-              <a href="https://youtube.com" target="_blank">YouTube</a>
+              <a href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+              <a href="https://mail.google.com" target="_blank" rel="noreferrer">Gmail</a>
+              <a href="https://drive.google.com" target="_blank" rel="noreferrer">Drive</a>
+              <a href="https://youtube.com" target="_blank" rel="noreferrer">YouTube</a>
             </div>
           </article>
 
@@ -286,30 +351,45 @@ export default function Home() {
               </div>
               <span className="online">ONLINE</span>
             </div>
-
             <div className="metrics">
-              <div>
-                <span>CPU</span>
-                <div className="meter"><i style={{ width: "18%" }} /></div>
-                <b>18%</b>
-              </div>
-              <div>
-                <span>RAM</span>
-                <div className="meter"><i style={{ width: "42%" }} /></div>
-                <b>42%</b>
-              </div>
-              <div>
-                <span>Disco</span>
-                <div className="meter"><i style={{ width: "61%" }} /></div>
-                <b>61%</b>
-              </div>
+              <div><span>CPU</span><div className="meter"><i style={{ width: "18%" }} /></div><b>18%</b></div>
+              <div><span>RAM</span><div className="meter"><i style={{ width: "42%" }} /></div><b>42%</b></div>
+              <div><span>Disco</span><div className="meter"><i style={{ width: "61%" }} /></div><b>61%</b></div>
             </div>
-            <p className="hint">
-              Na próxima etapa, estes dados poderão vir de um agente real instalado no Windows.
-            </p>
+            <p className="hint">Na próxima etapa, estes dados poderão vir de um agente real instalado no Windows.</p>
           </article>
         </section>
-      </section>
+      </>
+    );
+  }
+
+  return (
+    <main className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brandMark">M</div>
+          <div>
+            <strong>Maike Hub</strong>
+            <span>Personal OS</span>
+          </div>
+        </div>
+
+        <nav>
+          <NavButton id="inicio" icon="⌂" label="Início" />
+          <NavButton id="tarefas" icon="✓" label="Tarefas" />
+          <NavButton id="notas" icon="✎" label="Notas" />
+          <NavButton id="calendario" icon="◫" label="Calendário" />
+          <NavButton id="arquivos" icon="⌁" label="Arquivos" />
+          <NavButton id="configuracoes" icon="⚙" label="Configurações" />
+        </nav>
+
+        <div className="sidebarBottom">
+          <div className="statusDot" />
+          <span>Sistema online</span>
+        </div>
+      </aside>
+
+      <section className="content">{renderContent()}</section>
     </main>
   );
 }
